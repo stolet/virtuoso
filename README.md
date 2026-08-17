@@ -1,14 +1,14 @@
-# Virtualized TCP Acceleration Service
+# Virtuoso TCP Acceleration Service
 
 [![Documentation Status](https://readthedocs.org/projects/tas/badge/?version=latest)](https://tas.readthedocs.io/en/latest/?badge=latest)
 
 
-vTAS is a drop-in highly CPU efficient and scalable TCP acceleration service for
+Virtuoso is a drop-in highly CPU efficient and scalable TCP acceleration service for
 virtualized environments.
 
 ## Building
 Requirements:
-  * vTAS is built on top of Intel DPDK for direct access to the NIC. We have
+  * Virtuoso is built on top of Intel DPDK for direct access to the NIC. We have
     tested this version with dpdk version 21.
 
 Assuming that dpdk is installed through the system package manager, the
@@ -17,7 +17,7 @@ following suffices to build TAS:
 make
 ```
 
-This will build the vTAS service (binary `tas/tas`), client libraries (in
+This will build the Virtuoso service (binary `tas/tas`), client libraries (in
 `lib/`), and a few debugging tools (in `tools/`).
 
 
@@ -41,9 +41,9 @@ PKG_CONFIG= PKG_CONFIG_PATH=/local/antoinek/dpdk/usr/local/lib/x86_64-linux-gnu/
 
 ## Running
 
-Before running vTAS the following steps are necessary:
+Before running Virtuoso the following steps are necessary:
    * Make sure `hugetlbfs` is mounted on `/dev/hugepages` and enough huge pages are
-     allocated for vTAS and dpdk.
+     allocated for Virtuoso and dpdk.
    * Binding the NIC to the dpdk driver, as with any other dpdk application (for
      Intel NICs use `vfio` because `uio` does not support multiple interrupts).
 
@@ -54,21 +54,21 @@ echo 1024 | sudo tee /sys/devices/system/node/node*/hugepages/hugepages-2048kB/n
 sudo ~/dpdk-inst/sbin/dpdk-devbind  -b vfio-pci 0000:08:00.0
 ```
 
-To run vTAS you need to start 4 different components:
-vTAS, the host proxy, a VM using QEMU's ivshmem and the guest proxy.
+To run Virtuoso you need to start 4 different components:
+Virtuoso, the host proxy, a VM using QEMU's ivshmem and the guest proxy.
 
-First start vTAS on the host with the following command:
+First start Virtuoso on the host with the following command:
 ```
 sudo code/tas/tas --ip-addr=10.0.0.1/24 --fp-cores-max=1 --fp-no-ints --fp-no-autoscale --dpdk-extra="-a08:00.0"
 ```
 
-After vTAS starts run the host proxy:
+After Virtuoso starts run the host proxy:
 ```
 sudo code/proxy/host/host
 ```
 
 With the host proxy up and running you can start QEMU with ivshmem. 
-QEMU will grab the shared memory region opened by vTAS from the host proxy. 
+QEMU will grab the shared memory region opened by Virtuoso from the host proxy. 
 You need a configured VM image before you can start QEMU. If you don't have one,
 follow the steps in the [Building Images for QEMU](#building-images-for-qemu)
 section. If you already have set up an image, start a VM with the command below:
@@ -97,7 +97,7 @@ ssh -p 2222 tas@localhost
 sudo code/tas/proxy/guest/guest
 ```
 
-After the guest proxy is running you can run applications that use vTAS
+After the guest proxy is running you can run applications that use Virtuoso
 inside the VM. Applications that directly link to `libtas` or
 `libtas_sockets` can be run directly. To run an unmodified application with
 sockets interposition run as follows (for example):
