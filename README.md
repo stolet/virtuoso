@@ -1,4 +1,4 @@
-# <img src="doc/virtuoso.svg" alt="Virtuoso logo" height="80" style="vertical-align: middle;"> Virtuoso TCP Acceleration Service
+# <img src="doc/virtuoso-animated.svg" alt="Virtuoso logo" height="80" style="vertical-align: middle;"> Virtuoso TCP Acceleration Service
 
 [![Documentation Status](https://readthedocs.org/projects/tas/badge/?version=latest)](https://tas.readthedocs.io/en/latest/?badge=latest)
 
