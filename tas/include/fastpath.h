@@ -59,6 +59,7 @@ struct qman_thread {
   /************************************/
   /* read-only */
   struct queue *queues;
+  uint16_t id;
 
   /************************************/
   /* modified by owner thread */

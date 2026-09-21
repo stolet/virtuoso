@@ -110,6 +110,8 @@ int tas_qman_thread_init(struct dataplane_context *ctx)
   struct qman_thread *t = &ctx->qman;
   unsigned i;
 
+  t->id = ctx->id;
+
   if ((t->queues = calloc(1, sizeof(*t->queues) * FLEXNIC_NUM_QMQUEUES))
       == NULL)
   {
@@ -202,6 +204,38 @@ int tas_qman_poll(struct qman_thread *t, unsigned num, unsigned *q_ids,
     appctx = (t->appctx_next + i) % FLEXNIC_PL_APPCTX_NUM;
     qa = &t->appctx[appctx];
 
+    x = poll_raw(t, qa, ts, num, q_ids, q_bytes);
+    if (x > 0) {
+      t->appctx_next = (appctx + 1) % FLEXNIC_PL_APPCTX_NUM;
+      return x;
+    }
+  }
+
+  t->appctx_next = (t->appctx_next + 1) % FLEXNIC_PL_APPCTX_NUM;
+  return 0;
+}
+
+int tas_qman_poll_tenant(struct qman_thread *t, unsigned num,
+    unsigned *q_ids, uint16_t *q_bytes, uint32_t tenant)
+{
+  unsigned i, x;
+  uint16_t appctx;
+  struct qman_appctx *qa;
+  struct flextcp_pl_appctx *actx;
+  uint32_t ts = timestamp();
+
+  if (num == 0) {
+    return 0;
+  }
+
+  for (i = 0; i < FLEXNIC_PL_APPCTX_NUM; i++) {
+    appctx = (t->appctx_next + i) % FLEXNIC_PL_APPCTX_NUM;
+    actx = &fp_state->appctx[t->id][appctx];
+    if (actx->tx_len == 0 || actx->appst_id != tenant) {
+      continue;
+    }
+
+    qa = &t->appctx[appctx];
     x = poll_raw(t, qa, ts, num, q_ids, q_bytes);
     if (x > 0) {
       t->appctx_next = (appctx + 1) % FLEXNIC_PL_APPCTX_NUM;

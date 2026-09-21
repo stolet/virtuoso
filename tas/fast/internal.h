@@ -66,6 +66,8 @@ int tas_qman_thread_init(struct dataplane_context *ctx);
 uint32_t tas_qman_timestamp(uint64_t tsc);
 int tas_qman_poll(struct qman_thread *t, unsigned num, unsigned *q_ids,
     uint16_t *q_bytes);
+int tas_qman_poll_tenant(struct qman_thread *t, unsigned num,
+    unsigned *q_ids, uint16_t *q_bytes, uint32_t tenant);
 int tas_qman_set(struct qman_thread *t, uint32_t id, uint32_t rate, uint32_t avail,
     uint16_t max_chunk, uint8_t flags);
 uint32_t tas_qman_next_ts(struct qman_thread *t, uint32_t cur_ts);

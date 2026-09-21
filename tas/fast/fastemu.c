@@ -64,10 +64,22 @@ static void dataplane_block(struct dataplane_context *ctx, uint32_t ts);
 static unsigned poll_rx(struct dataplane_context *ctx, uint32_t ts,
     uint64_t tsc) __attribute__((noinline));
 static unsigned poll_queues(struct dataplane_context *ctx, uint32_t ts)  __attribute__((noinline));
+static unsigned poll_queues_tenant(struct dataplane_context *ctx,
+    uint32_t ts, uint32_t tenant) __attribute__((noinline));
 static unsigned poll_kernel(struct dataplane_context *ctx, uint32_t ts) __attribute__((noinline));
 static unsigned poll_qman(struct dataplane_context *ctx, uint32_t ts) __attribute__((noinline));
+static unsigned poll_qman_tenant(struct dataplane_context *ctx,
+    uint32_t ts, uint32_t tenant) __attribute__((noinline));
 static unsigned poll_qman_fwd(struct dataplane_context *ctx, uint32_t ts) __attribute__((noinline));
 static void poll_scale(struct dataplane_context *ctx);
+
+static inline int appctx_tenant(struct dataplane_context *ctx,
+    uint32_t id, uint32_t tenant)
+{
+  struct flextcp_pl_appctx *actx = &fp_state->appctx[ctx->id][id];
+
+  return actx->tx_len != 0 && actx->appst_id == tenant;
+}
 
 static inline uint8_t bufcache_prealloc(struct dataplane_context *ctx, uint16_t num,
     struct network_buf_handle ***handles);
@@ -177,21 +189,27 @@ void dataplane_loop(struct dataplane_context *ctx)
     STATS_TSADD(ctx, cyc_rx, rx - start);
     if (rx_n != 0)
       STATS_TSADD(ctx, cycw_rx, rx - start);
-    qm_n = poll_qman(ctx, ts);
-    n += qm_n;
-    STATS_TS(qm);
-    STATS_TSADD(ctx, cyc_qm, qm - rx);
-    if (qm_n != 0)
-      STATS_TSADD(ctx, cycw_qm, qm - rx);
-    qs_n = poll_queues(ctx, ts);
-    n += qs_n;
-    STATS_TS(qs);
-    STATS_TSADD(ctx, cyc_qs, qs - qm);
-    if (qs_n != 0)
-      STATS_TSADD(ctx, cycw_qs, qs - qm);
+
+    for (unsigned tenant = 0; tenant < FLEXNIC_PL_APPST_NUM; tenant++) {
+      qm_n = poll_qman_tenant(ctx, ts, tenant);
+      n += qm_n;
+      STATS_TS(qm);
+      STATS_TSADD(ctx, cyc_qm, qm - rx);
+      if (qm_n != 0)
+        STATS_TSADD(ctx, cycw_qm, qm - rx);
+
+      qs_n = poll_queues_tenant(ctx, ts, tenant);
+      n += qs_n;
+      STATS_TS(qs);
+      STATS_TSADD(ctx, cyc_qs, qs - qm);
+      if (qs_n != 0)
+        STATS_TSADD(ctx, cycw_qs, qs - qm);
+
+      tx_flush(ctx);
+    }
+
     n += poll_kernel(ctx, ts);
 
-    /* flush transmit buffer */
     tx_flush(ctx);
 
     if (ctx->id == 0)
@@ -433,6 +451,70 @@ static unsigned poll_queues(struct dataplane_context *ctx, uint32_t ts)
   return total;
 }
 
+static unsigned poll_queues_tenant(struct dataplane_context *ctx,
+    uint32_t ts, uint32_t tenant)
+{
+  struct network_buf_handle **handles;
+  void *aqes[BATCH_SIZE];
+  unsigned n, i, total = 0;
+  uint16_t max, k = 0, num_bufs = 0, j, id;
+  int ret;
+
+  STATS_ADD(ctx, qs_poll, 1);
+  BATCH_STATS_ADD(ctx, qs_polls, 1);
+
+  max = BATCH_SIZE;
+  if (TXBUF_SIZE - ctx->tx_num < max)
+    max = TXBUF_SIZE - ctx->tx_num;
+
+  max = bufcache_prealloc(ctx, max, &handles);
+
+  for (n = 0; n < FLEXNIC_PL_APPCTX_NUM; n++) {
+    id = (ctx->poll_next_ctx + n) % FLEXNIC_PL_APPCTX_NUM;
+    if (appctx_tenant(ctx, id, tenant))
+      fast_appctx_poll_pf(ctx, id);
+  }
+
+  for (n = 0; n < FLEXNIC_PL_APPCTX_NUM && k < max; n++) {
+    id = (ctx->poll_next_ctx + n) % FLEXNIC_PL_APPCTX_NUM;
+    if (!appctx_tenant(ctx, id, tenant))
+      continue;
+
+    for (i = 0; i < BATCH_SIZE && k < max; i++) {
+      ret = fast_appctx_poll_fetch(ctx, id, &aqes[k]);
+      if (ret == 0)
+        k++;
+      else
+        break;
+
+      total++;
+    }
+
+    ctx->poll_next_ctx = (id + 1) % FLEXNIC_PL_APPCTX_NUM;
+  }
+
+  for (j = 0; j < k; j++) {
+    ret = fast_appctx_poll_bump(ctx, aqes[j], handles[num_bufs], ts);
+    if (ret == 0)
+      num_bufs++;
+  }
+
+  bufcache_alloc(ctx, num_bufs);
+
+  for (n = 0; n < FLEXNIC_PL_APPCTX_NUM; n++) {
+    id = (ctx->poll_next_ctx + n) % FLEXNIC_PL_APPCTX_NUM;
+    if (appctx_tenant(ctx, id, tenant))
+      fast_actx_rxq_probe(ctx, id);
+  }
+
+  STATS_ADD(ctx, qs_total, total);
+  BATCH_STATS_ADD(ctx, qs_total, total);
+  if (total == 0)
+    STATS_ADD(ctx, qs_empty, 1);
+
+  return total;
+}
+
 static unsigned poll_kernel(struct dataplane_context *ctx, uint32_t ts)
 {
   struct network_buf_handle **handles;
@@ -518,6 +600,60 @@ static unsigned poll_qman(struct dataplane_context *ctx, uint32_t ts)
   }
 
   /* apply buffer reservations */
+  bufcache_alloc(ctx, off);
+
+  return ret;
+}
+
+static unsigned poll_qman_tenant(struct dataplane_context *ctx,
+    uint32_t ts, uint32_t tenant)
+{
+  unsigned q_ids[BATCH_SIZE];
+  uint16_t q_bytes[BATCH_SIZE];
+  struct network_buf_handle **handles;
+  uint16_t off = 0, max;
+  int ret, i, use;
+
+  max = BATCH_SIZE;
+  if (TXBUF_SIZE - ctx->tx_num < max)
+    max = TXBUF_SIZE - ctx->tx_num;
+
+  STATS_ADD(ctx, qm_poll, 1);
+  BATCH_STATS_ADD(ctx, qm_polls, 1);
+
+  max = bufcache_prealloc(ctx, max, &handles);
+
+  ret = tas_qman_poll_tenant(&ctx->qman, max, q_ids, q_bytes, tenant);
+  if (ret <= 0) {
+    STATS_ADD(ctx, qm_empty, 1);
+    return 0;
+  }
+
+  STATS_ADD(ctx, qm_total, ret);
+  BATCH_STATS_ADD(ctx, qm_total, ret);
+
+  for (i = 0; i < ret; i++) {
+    rte_prefetch0(handles[i]);
+  }
+
+  for (i = 0; i < ret; i++) {
+    rte_prefetch0((uint8_t *) handles[i] + 64);
+  }
+
+  for (i = 0; i < ret; i++) {
+    rte_prefetch0(network_buf_buf(handles[i]));
+  }
+
+  fast_flows_qman_pf(ctx, q_ids, ret);
+  fast_flows_qman_pfbufs(ctx, q_ids, ret);
+
+  for (i = 0; i < ret; i++) {
+    use = fast_flows_qman(ctx, q_ids[i], handles[off], ts);
+
+    if (use == 0)
+      off++;
+  }
+
   bufcache_alloc(ctx, off);
 
   return ret;
