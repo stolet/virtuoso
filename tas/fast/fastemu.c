@@ -469,14 +469,19 @@ static unsigned poll_queues_tenant(struct dataplane_context *ctx,
 
   max = bufcache_prealloc(ctx, max, &handles);
 
+  /* Keep the scan origin stable while walking the contexts.  The cursor is
+   * advanced below after each matching context; using the mutable cursor as
+   * the base together with n skips contexts. */
+  uint32_t poll_start = ctx->poll_next_ctx;
+
   for (n = 0; n < FLEXNIC_PL_APPCTX_NUM; n++) {
-    id = (ctx->poll_next_ctx + n) % FLEXNIC_PL_APPCTX_NUM;
+    id = (poll_start + n) % FLEXNIC_PL_APPCTX_NUM;
     if (appctx_tenant(ctx, id, tenant))
       fast_appctx_poll_pf(ctx, id);
   }
 
   for (n = 0; n < FLEXNIC_PL_APPCTX_NUM && k < max; n++) {
-    id = (ctx->poll_next_ctx + n) % FLEXNIC_PL_APPCTX_NUM;
+    id = (poll_start + n) % FLEXNIC_PL_APPCTX_NUM;
     if (!appctx_tenant(ctx, id, tenant))
       continue;
 
