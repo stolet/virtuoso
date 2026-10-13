@@ -1,7 +1,5 @@
 # <img src="doc/virtuoso-animated.svg" alt="Virtuoso logo" height="80" style="vertical-align: middle;"> Virtuoso TCP Acceleration Service
 
-[![Documentation Status](https://readthedocs.org/projects/tas/badge/?version=latest)](https://tas.readthedocs.io/en/latest/?badge=latest)
-
 Virtuoso is a drop-in highly CPU efficient and scalable TCP acceleration service for
 virtualized environments that isolates interference between tenants in the same
 shared datapath. Virtuoso builds on the TAS project.
